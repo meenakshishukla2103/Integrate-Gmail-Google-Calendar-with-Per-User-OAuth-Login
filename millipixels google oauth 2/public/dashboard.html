@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container container-dashboard">
+        <div class="dashboard-header">
+            <h1>Dashboard</h1>
+            <button class="btn-logout" onclick="logout()">Logout</button>
+        </div>
+
+        <section class="dashboard-section">
+            <h2>Profile</h2>
+            <div class="user-info">
+                <p><label>Email</label> <span id="email">-</span></p>
+                <p><label>Name</label> <span id="name">-</span></p>
+                <p><label>Account ID</label> <span id="account-id" class="muted">-</span></p>
+                <p><label>Google account</label> <span id="google-status" class="status">-</span></p>
+                <p><label>Credentials updated</label> <span id="credentials-updated" class="muted">-</span></p>
+            </div>
+        </section>
+
+        <section class="dashboard-section">
+            <h2>Upcoming events</h2>
+            <div id="events-loading" class="loading">Loading…</div>
+            <ul id="events-list" class="data-list" style="display:none;"></ul>
+            <p id="events-empty" class="empty" style="display:none;">No upcoming events.</p>
+            <p id="events-error" class="error-msg" style="display:none;"></p>
+        </section>
+
+        <section class="dashboard-section">
+            <h2>Tasks</h2>
+            <div id="tasks-loading" class="loading">Loading…</div>
+            <ul id="tasks-list" class="data-list" style="display:none;"></ul>
+            <p id="tasks-empty" class="empty" style="display:none;">No tasks.</p>
+            <p id="tasks-error" class="error-msg" style="display:none;"></p>
+        </section>
+    </div>
+    <script>
+        function formatDate(iso) {
+            if (!iso) return '-';
+            const d = new Date(iso);
+            return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        }
+
+        function loadUser() {
+            fetch('/api/user')
+                .then(r => {
+                    if (r.status === 401) { window.location.href = '/'; return null; }
+                    return r.json();
+                })
+                .then(data => {
+                    if (!data) return;
+                    document.getElementById('email').textContent = data.email || '-';
+                    document.getElementById('name').textContent = data.name || '-';
+                    document.getElementById('account-id').textContent = data.internal_user_id ? data.internal_user_id.slice(0, 20) + '…' : '-';
+                    document.getElementById('google-status').textContent = data.token_expiry ? 'Linked' : 'Not linked';
+                    document.getElementById('google-status').className = 'status ' + (data.token_expiry ? 'status-ok' : 'status-warn');
+                    document.getElementById('credentials-updated').textContent = data.credentials_updated ? formatDate(data.credentials_updated) : '-';
+                })
+                .catch(() => window.location.href = '/');
+        }
+
+        function loadEvents() {
+            const now = new Date().toISOString();
+            fetch('/api/google/calendar/events?maxResults=5&timeMin=' + encodeURIComponent(now))
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('events-loading').style.display = 'none';
+                    if (data.error || data.requires_reauth) {
+                        var msg = (data.error === 'Request failed' || data.requires_reauth)
+                            ? 'Sign out and sign in again to enable Calendar.'
+                            : (data.error || 'Please sign in again.');
+                        document.getElementById('events-error').textContent = msg;
+                        document.getElementById('events-error').style.display = 'block';
+                        return;
+                    }
+                    const items = (data.items || []).filter(e => e.summary);
+                    if (items.length === 0) {
+                        document.getElementById('events-empty').style.display = 'block';
+                        return;
+                    }
+                    const ul = document.getElementById('events-list');
+                    ul.style.display = 'block';
+                    ul.innerHTML = items.map(e => {
+                        const start = (e.start && (e.start.dateTime || e.start.date)) || '';
+                        return '<li><strong>' + (e.summary || 'Event') + '</strong> ' + formatDate(start) + '</li>';
+                    }).join('');
+                })
+                .catch(() => {
+                    document.getElementById('events-loading').style.display = 'none';
+                    document.getElementById('events-error').textContent = 'Could not load events.';
+                    document.getElementById('events-error').style.display = 'block';
+                });
+        }
+
+        function loadTasks() {
+            fetch('/api/google/reminders')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('tasks-loading').style.display = 'none';
+                    if (data.error || data.requires_reauth) {
+                        var msg = (data.error === 'Request failed' || data.requires_reauth)
+                            ? 'Sign out and sign in again to enable Tasks.'
+                            : (data.error || 'Please sign in again.');
+                        document.getElementById('tasks-error').textContent = msg;
+                        document.getElementById('tasks-error').style.display = 'block';
+                        return;
+                    }
+                    const items = data.items || [];
+                    if (items.length === 0) {
+                        document.getElementById('tasks-empty').style.display = 'block';
+                        return;
+                    }
+                    const ul = document.getElementById('tasks-list');
+                    ul.style.display = 'block';
+                    ul.innerHTML = items.slice(0, 10).map(t => {
+                        const done = (t.status || '') === 'completed';
+                        return '<li class="' + (done ? 'task-done' : '') + '">' + (t.title || 'Task') + '</li>';
+                    }).join('');
+                })
+                .catch(() => {
+                    document.getElementById('tasks-loading').style.display = 'none';
+                    document.getElementById('tasks-error').textContent = 'Could not load tasks.';
+                    document.getElementById('tasks-error').style.display = 'block';
+                });
+        }
+
+        loadUser();
+        loadEvents();
+        loadTasks();
+
+        function logout() {
+            fetch('/api/logout', { method: 'POST' })
+                .then(() => window.location.href = '/');
+        }
+    </script>
+</body>
+</html>
